@@ -1,9 +1,20 @@
 package main
 
 import (
+	"net/http"
+
 	"github.com/mmcdole/gofeed"
 	log "github.com/sirupsen/logrus"
 )
+
+type UserAgentTransport struct {
+	http.RoundTripper
+}
+
+func (c *UserAgentTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r.Header.Set("User-Agent", "FeedSquirrel / 1.0")
+	return c.RoundTripper.RoundTrip(r)
+}
 
 func toDatabase(feed gofeed.Feed) {
 	log.WithFields(log.Fields{
@@ -27,6 +38,9 @@ func worker(id int, jobs <-chan string) {
 		}).Debug("Scraping feed")
 
 		parser := gofeed.NewParser()
+		parser.Client = &http.Client{ // workaround for problems with User-Agent, see https://github.com/mmcdole/gofeed/issues/74
+			Transport: &UserAgentTransport{http.DefaultTransport},
+		}
 		feed, err := parser.ParseURL(url)
 		if err != nil {
 			handleError(url, err)
