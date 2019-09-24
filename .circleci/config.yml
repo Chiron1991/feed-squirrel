@@ -8,4 +8,4 @@ jobs:
     working_directory: /go/src/github.com/{{ORG_NAME}}/{{REPO_NAME}}
     steps:
       - checkout
-      - go test -v ./utils
+      - run: go test -v ./utils
