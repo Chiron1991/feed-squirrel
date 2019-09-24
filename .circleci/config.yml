@@ -5,7 +5,8 @@ jobs:
   build:
     docker:
       - image: circleci/golang:1.12
-    working_directory: /go/src/github.com/Chiron1991/feed-squirrel
+        environment:
+          GO111MODULE: "on"
     steps:
       - checkout
       - run: go mod download
