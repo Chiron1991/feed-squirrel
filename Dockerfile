@@ -9,6 +9,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o feed-squirrel .
 FROM alpine:3.10
 WORKDIR /root/
 COPY --from=builder /app/feed-squirrel .
+COPY backend/models/migrations migrations
 COPY frontend/build frontend
-EXPOSE 8080
+RUN apk --no-cache add ca-certificates
+EXPOSE 80
 CMD ["./feed-squirrel"]
