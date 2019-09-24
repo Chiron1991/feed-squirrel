@@ -1,10 +1,12 @@
 package main
 
 import (
-	"net/http"
-
+	"github.com/Chiron1991/feed-squirrel/backend/models"
+	"github.com/Chiron1991/feed-squirrel/backend/utils"
 	"github.com/mmcdole/gofeed"
 	log "github.com/sirupsen/logrus"
+	"net/http"
+	"runtime"
 )
 
 type UserAgentTransport struct {
@@ -16,70 +18,81 @@ func (c *UserAgentTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 	return c.RoundTripper.RoundTrip(r)
 }
 
-func toDatabase(feed gofeed.Feed) {
-	log.WithFields(log.Fields{
-		"feedUrl":   feed.Link,
-		"feedTitle": feed.Title,
-	}).Info("Successfully parsed feed")
+func ScrapeDueFeeds() {
+	// get due feeds from db
+	dueFeeds := models.GetFeedsDueForScraping()
+
+	jobs := make(chan models.Feed, 100)
+
+	// declare workers
+	for id := 1; id <= runtime.NumCPU(); id++ {
+		go scrapeWorker(id, jobs)
+	}
+
+	// stuff feeds into worker
+	for _, feed := range *dueFeeds {
+		jobs <- feed
+	}
+	close(jobs)
 }
 
-func handleError(url string, err error) {
-	log.WithFields(log.Fields{
-		"feedUrl": url,
-		"error":   err,
-	}).Error("Failed parsing feed")
-}
-
-func worker(id int, jobs <-chan string) {
-	for url := range jobs {
+func scrapeWorker(id int, jobs <-chan models.Feed) {
+	for feed := range jobs {
 		log.WithFields(log.Fields{
 			"workerId": id,
-			"feedUrl":  url,
+			"feedID":   feed.ID,
+			"feedLink": feed.FeedLink,
 		}).Debug("Scraping feed")
 
 		parser := gofeed.NewParser()
-		parser.Client = &http.Client{ // workaround for problems with User-Agent, see https://github.com/mmcdole/gofeed/issues/74
+		// workaround for problems with User-Agent, see https://github.com/mmcdole/gofeed/issues/74
+		parser.Client = &http.Client{
 			Transport: &UserAgentTransport{http.DefaultTransport},
 		}
-		feed, err := parser.ParseURL(url)
+		parsed, err := parser.ParseURL(feed.FeedLink)
+
 		if err != nil {
-			handleError(url, err)
+			log.WithFields(log.Fields{
+				"feedID":   feed.ID,
+				"feedLink": feed.Link,
+				"error":    err,
+			}).Error("Failed parsing feed")
 		} else {
-			toDatabase(*feed)
+			log.WithFields(log.Fields{
+				"feedLink":  feed.FeedLink,
+				"feedTitle": feed.Title,
+			}).Debug("Successfully parsed feed")
+
+			// todo: set last_scraped on Feed model
+
+			// write each retrieved item to db
+			for _, item := range parsed.Items {
+				feedItem := models.FeedItem{
+					FeedID:      feed.ID,
+					Title:       item.Title,
+					Description: item.Description,
+					Content:     item.Content,
+					Link:        item.Link,
+					Updated:     utils.TimeToNullTime(item.UpdatedParsed),
+					Published:   utils.TimeToNullTime(item.PublishedParsed),
+					//Author:      utils.StrToNullStr(item.Author),
+					GUID: item.GUID,
+				}
+				if !feedItem.Exists() {
+					log.WithFields(log.Fields{
+						"feedLink":     feed.FeedLink,
+						"feedTitle":    feed.Title,
+						"feedItemGUID": item.GUID,
+					}).Debug("Feed item is new, persisting it")
+					feedItem.Create()
+				} else {
+					log.WithFields(log.Fields{
+						"feedLink":     feed.FeedLink,
+						"feedTitle":    feed.Title,
+						"feedItemGUID": item.GUID,
+					}).Debug("Feed item already scraped")
+				}
+			}
 		}
 	}
-}
-
-func ScrapeDueFeeds() {
-	log.Trace("Starting to scrape due feeds")
-
-	feedUrls := []string{
-		"https://www.computerbase.de/rss/news.xml",
-		"https://blog.fefe.de/rss.xml?html",
-		"https://rss.golem.de/rss.php?feed=ATOM1.0",
-		"https://hnrss.org/frontpage",
-		"https://www.reddit.com/r/pathofexile/search.rss?q=flair:%22GGG%22&sort=new",
-		"https://thearmoredpatrol.com/category/world-of-tanks/feed/",
-		"https://xkcd.com/rss.xml",
-		"http://www.pathofexile.com/news/rss",
-		"http://feeds.feedburner.com/blogspot/rkEL",
-		"https://www.kernel.org/feeds/kdist.xml",
-		"http://feeds.feedburner.com/d0od",
-		"http://us2.campaign-archive1.com/feed?u=e2e180baf855ac797ef407fc7&id=9e26887fc5",
-	} // TODO: replace with DB lookup
-
-	jobs := make(chan string, 100)
-
-	// spawn workers
-	for w := 1; w <= *maxConc; w++ {
-		go worker(w, jobs)
-	}
-
-	// stuff urls into worker
-	for _, url := range feedUrls {
-		log.Trace("Stuffing " + url + " into worker")
-		jobs <- url
-	}
-	close(jobs)
-	log.Trace("Closed jobs channel")
 }
