@@ -5,7 +5,7 @@ jobs:
   build:
     docker:
       - image: circleci/golang:1.12
-    working_directory: /go/src/github.com/{{ORG_NAME}}/{{REPO_NAME}}
+    working_directory: /go/src/github.com/Chiron1991/feed-squirrel
     steps:
       - checkout
       - run: go test -v ./utils
