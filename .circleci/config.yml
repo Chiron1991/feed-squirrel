@@ -8,5 +8,5 @@ jobs:
     working_directory: /go/src/github.com/Chiron1991/feed-squirrel
     steps:
       - checkout
-      - run: go mod download -v
+      - run: go mod download
       - run: go test -v ./backend/*/
